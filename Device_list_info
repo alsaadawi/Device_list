@@ -1,0 +1,106 @@
+import csv
+import datetime
+import json
+import requests
+import urllib3
+
+from requests.auth import HTTPBasicAuth
+from urllib3.exceptions import InsecureRequestWarning
+from config import DNAC_USER, DNAC_PASS
+
+
+urllib3.disable_warnings(InsecureRequestWarning)
+DNAC_AUTH = HTTPBasicAuth(DNAC_USER, DNAC_PASS)
+
+SERVERS = {
+    "americas": 'URL1',
+    "emea": 'URL2',
+    "apac": 'URL3'
+}
+
+
+def pprint(json_data):
+    print(json.dumps(json_data, indent=4, separators=(' , ', ' : ')))
+
+
+def get_dnac_jwt_token(dnac_auth, url):
+    url = url + '/dna/system/api/v1/auth/token'
+    header = {'content-type': 'application/json'}
+    response = requests.post(url, auth=dnac_auth, headers=header, verify=False)
+    dnac_jwt_token = response.json()['Token']
+    return dnac_jwt_token
+'''
+def get_unclaimed_devices(dnac_token, url):
+    unclaimed_devices = []
+    
+    url_dev = url + '/dna/intent/api/v1/onboarding/pnp-device'
+    header = {'content-type': 'application/json', 'x-auth-token': dnac_token}
+    response = requests.get(url_dev, headers=header, verify=False)
+    total_devices = response.json()['response']
+'''
+def get_all_device_list(dnac_jwt_token, url):
+    all_devices_info = []
+    offset = 1
+    limit = 500
+    url_dev = url + '/dna/intent/api/v1/network-device/count'
+    header = {'content-type': 'application/json', 'x-auth-token': dnac_jwt_token}
+    count_response = requests.get(url_dev, headers=header, verify=False)
+    total_devices = count_response.json()['response']
+
+    while offset < total_devices:
+        url_dev = url + '/dna/intent/api/v1/network-device?offset=' + str(offset) + '&limit=' + str(limit)
+        header = {'content-type': 'application/json', 'x-auth-token': dnac_jwt_token}
+        all_devices_response = requests.get(url_dev, headers=header, verify=False)
+        all_devices_json = all_devices_response.json()['response']
+        all_devices_info += all_devices_json
+        offset += 500
+
+    return all_devices_info
+
+
+def main():
+    date_time = str(datetime.datetime.now().replace(microsecond=0))
+    print('\nApplication "Device_list_info.py" Run Started: ' + date_time)
+    output_file = open('global_report.csv', 'w', newline='')
+    output_writer = csv.writer(output_file)
+
+    for key in SERVERS:
+        url = 'https://' + SERVERS[key]
+        print('Connecting to ' + url)
+        dnac_auth = get_dnac_jwt_token(DNAC_AUTH, url)
+        print('Got token correctly, getting device list...')
+        all_device_list = get_all_device_list(dnac_auth, url)
+        device_count = len(all_device_list)
+        print(device_count)
+
+        if device_count == [0]:
+            print('\nCisco DNA Center does not manage any devices')
+        else:
+            print('\nCisco DNA Center manages this number of devices: ', device_count)
+            #Region based CSV files
+            #output_file = open(key + '_report.csv', 'w', newline='')
+            #output_writer = csv.writer(output_file)
+
+            for device in all_device_list:
+                device_hostname = device['hostname']
+                device_type = device['type']
+                device_software_version = device['softwareVersion']
+                device_management_ip = device['managementIpAddress']
+                device_sn = device['serialNumber']
+                device_mem = device['memorySize']
+                device_mgmt_state = device['managementState']
+                device_reach_fail = device['reachabilityFailureReason']
+                device_support = device['deviceSupportLevel']
+                device_reachability = device['reachabilityStatus']
+                device_info = [device_hostname, device_type, device_software_version, device_management_ip, device_sn,
+                               device_mem, device_mgmt_state, device_reach_fail, device_support, device_reachability]
+                output_writer.writerow(device_info)
+
+            print('\n\nFile "device_report.csv" saved')
+
+    print('\n\nEnd of application "Device_list_info" run')
+    output_file.close()
+
+
+if __name__ == "__main__":
+    main()
